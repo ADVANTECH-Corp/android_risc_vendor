@@ -1,2 +1,0 @@
-# android_risc_vendor
-android_risc_vendor
