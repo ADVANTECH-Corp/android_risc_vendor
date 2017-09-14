@@ -89,7 +89,7 @@ endif
 #LOCAL_CFLAGS += -DUSE_NDK
 #LOCAL_LDLIBS += -llog
 #else
-#LOCAL_SHARED_LIBRARIES := libcutils libutils libril libnetutils
+#LOCAL_SHARED_LIBRARIES := libcutils libutils
 #endif
 #LOCAL_MODULE_TAGS:=eng optional
 #LOCAL_MODULE:= chat
@@ -97,7 +97,12 @@ endif
 
 #include $(CLEAR_VARS)
 #LOCAL_SRC_FILES:= ip-up.c
+#ifeq ($(USE_NDK),1)
+#LOCAL_CFLAGS += -DUSE_NDK
+#LOCAL_LDLIBS += -llog
+#else
 #LOCAL_SHARED_LIBRARIES += libcutils libutils
+#endif
 #LOCAL_CFLAGS += -pie -fPIE
 #LOCAL_LDFLAGS += -pie -fPIE
 #LOCAL_MODULE_TAGS:=eng optional
@@ -107,7 +112,12 @@ endif
 
 #include $(CLEAR_VARS)
 #LOCAL_SRC_FILES:= ip-down.c
+#ifeq ($(USE_NDK),1)
+#LOCAL_CFLAGS += -DUSE_NDK
+#LOCAL_LDLIBS += -llog
+#else
 #LOCAL_SHARED_LIBRARIES += libcutils libutils
+#endif
 #LOCAL_CFLAGS += -pie -fPIE
 #LOCAL_LDFLAGS += -pie -fPIE
 #LOCAL_MODULE_TAGS:=eng optional

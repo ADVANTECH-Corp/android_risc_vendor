@@ -27,6 +27,7 @@ libquectel-ril: clean
 	$(NDK_BUILD) V=0 NDK_OUT=$(NDK_OUT)  NDK_LIBS_OUT=$(NDK_LIBS_OUT) APP_BUILD_SCRIPT=$(APP_BUILD_SCRIPT) NDK_PROJECT_PATH=$(NDK_PROJECT_PATH) NDK_DEBUG=$(NDK_DEBUG) APP_ABI=$(APP_ABI) APP_PLATFORM=$(APP_PLATFORM)
 	rm -rf ql-buildinfo.c
 	cp ql-ril.conf $(NDK_LIBS_OUT)
+	tar -czf ../SOURCE_$(tgz).tgz $(NDK_LIBS_OUT) ../reference-ril ../include
 	tar -czf ../$(tgz).tgz $(NDK_LIBS_OUT)
 
 clean:

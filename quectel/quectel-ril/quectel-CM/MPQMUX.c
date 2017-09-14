@@ -414,7 +414,7 @@ void dump_qmi(void *dataBuffer, int dataLen)
     //dbg("QMIType:            %02x\t\t%s", QMIHdr->QMIType, QMI_NAME(qmi_QMIType, QMIHdr->QMIType));
     //dbg("ClientId:           %02x", QMIHdr->ClientId);
 
-    if ((QMIHdr->QMIType == QMUX_TYPE_CTL) ) {
+    if (QMIHdr->QMIType == QMUX_TYPE_CTL) {
         dump_ctl(CTLHdr);
     } else {
         dump_qmux(QMIHdr->QMIType, QMUXHdr);

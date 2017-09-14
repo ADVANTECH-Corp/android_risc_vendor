@@ -55,6 +55,9 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <stdlib.h>
+
+#define CMUX_DRIVER_VERSION "Quectel_Linux_CMUX_Driver_V1.7.1"
+
 //#define XINGWANG_DEBUG
 #ifdef XINGWANG_DEBUG
 //#include "ct_linuxframwork_log.h"
@@ -2903,7 +2906,7 @@ int main(int argc,char *argv[])
     }
 #endif
     ql_cmux_debug = 1;
-    LOGMUX(LOG_INFO, "Quectel CMUX Revision: Quectel_Linux_CMUX_SR01A07V01");
+    LOGMUX(LOG_INFO, "Quectel CMUX Revision: %s", CMUX_DRIVER_VERSION);
     LOGMUX(LOG_DEBUG, "Enter");
 
     int opt;

@@ -8,6 +8,9 @@
 #define CONFIG_VERSION
 #define CONFIG_DEFAULT_PDP 1
 //#define CONFIG_IMSI_ICCID
+#ifndef ANDROID
+#define CONFIG_RESET_RADIO (45) //Reset Radiao(AT+CFUN=4,AT+CFUN=1) when cann not register network or setup data call in 45 seconds
+#endif
 
 #include <stdio.h>
 #include <string.h>
@@ -154,6 +157,7 @@ extern int requestSetProfile(PROFILE_T *profile);
 extern int requestGetProfile(PROFILE_T *profile);
 extern int requestBaseBandVersion(const char **pp_reversion);
 extern int requestGetIPAddress(PROFILE_T *profile, int curIpFamily);
+extern int requestSetOperatingMode(UCHAR OperatingMode);
 
 extern FILE *logfilefp;
 extern int debug_qmi;

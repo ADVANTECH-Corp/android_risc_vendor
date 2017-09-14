@@ -34,7 +34,7 @@ static int card_cnt = 0;
 
 struct ndis_arg_info {
     int usbnet_adapter_index;
-    char usbnet_adapter[MAX_PATH];
+    char usbnet_adapter[16];
 };
 
 
@@ -104,7 +104,6 @@ static void* ndis_thread_function(void*  arg) {
             LOGE("failed to start ('%s'): %s\n", "quectel-CM", strerror(errno));
             break;
         } else {
-            int sleep_msec = 3000;
             int status, retval = 0;
             ql_ndis_pid_arr[arg_info->usbnet_adapter_index] = child_pid;
             waitpid(child_pid, &status, 0);
@@ -131,7 +130,6 @@ static void* ndis_thread_function(void*  arg) {
 
 }
 
-
 int ql_ndis_stop(int signo);
 int ql_ndis_start(const char *apn, const char *user, const char *password, const char *auth_type, int default_pdp) {    
     static char *argv[4] = {NULL, NULL, NULL, NULL};
@@ -151,21 +149,17 @@ int ql_ndis_start(const char *apn, const char *user, const char *password, const
 
     ql_ndis_quit = 0;
 
-    int index = 0;
-    card_cnt = ql_get_usb_device_info(USB_AT_INF);
-
     static struct ndis_arg_info ndis_arg[MAX_CARD_NUM];
     memset(ndis_arg, 0, sizeof(ndis_arg));
 
-    for(index = 0; index < card_cnt; index++) {   
-        if(index > MAX_CARD_NUM) {
-            return -1;
-        }
+    for(card_cnt = 0; card_cnt < MAX_CARD_NUM; card_cnt++) {   
+
+        if (!ql_get_ndisname(ndis_arg[card_cnt].usbnet_adapter, card_cnt))
+            break;
         
-        strcpy(ndis_arg[index].usbnet_adapter, s_usb_device_info[index].ttyndis_name);
-        ndis_arg[index].usbnet_adapter_index = index;
+        ndis_arg[card_cnt].usbnet_adapter_index = card_cnt;
         
-        if (!ndis_create_thread(&ql_ndis_thread_arr[index], ndis_thread_function, (void*)(&ndis_arg[index]))) {
+        if (!ndis_create_thread(&ql_ndis_thread_arr[card_cnt], ndis_thread_function, (void*)(&ndis_arg[card_cnt]))) {
             pid = getpid();
         }
     }

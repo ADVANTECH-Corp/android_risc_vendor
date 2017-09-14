@@ -1098,6 +1098,7 @@ typedef struct _QMIDMS_UIM_GET_ICCID_RESP_MSG
    USHORT TLV2Length;       // var
    UCHAR  ICCID;      // String of voice number
 } QMIDMS_UIM_GET_ICCID_RESP_MSG, *PQMIDMS_UIM_GET_ICCID_RESP_MSG;
+#endif
 
 typedef struct _QMIDMS_SET_OPERATING_MODE_REQ_MSG
 {
@@ -1106,7 +1107,7 @@ typedef struct _QMIDMS_SET_OPERATING_MODE_REQ_MSG
    UCHAR  TLVType;          // 0x02 - result code
    USHORT TLVLength;        // 4
    UCHAR  OperatingMode;
-} QMIDMS_SET_OPERATING_MODE_REQ_MSG, *PQMIDMS_SET_OPERATING_MODE_REQ_MSG;
+} __attribute__ ((packed)) QMIDMS_SET_OPERATING_MODE_REQ_MSG, *PQMIDMS_SET_OPERATING_MODE_REQ_MSG;
 
 typedef struct _QMIDMS_SET_OPERATING_MODE_RESP_MSG
 {
@@ -1120,8 +1121,9 @@ typedef struct _QMIDMS_SET_OPERATING_MODE_RESP_MSG
                             // QMUX_ERR_NO_MEMORY
                             // QMUX_ERR_INTERNAL
                             // QMUX_ERR_FAULT
-} QMIDMS_SET_OPERATING_MODE_RESP_MSG, *PQMIDMS_SET_OPERATING_MODE_RESP_MSG;
+} __attribute__ ((packed)) QMIDMS_SET_OPERATING_MODE_RESP_MSG, *PQMIDMS_SET_OPERATING_MODE_RESP_MSG;
 
+#if 0
 typedef struct _QMIDMS_ACTIVATE_AUTOMATIC_REQ_MSG
 {
    USHORT Type;             // QMUX type 0x0024
@@ -3166,8 +3168,10 @@ typedef struct _QMUX_MSG
       QMIDMS_GET_ACTIVATED_STATUS_RESP_MSG      GetActivatedStatusResp;
       QMIDMS_GET_OPERATING_MODE_REQ_MSG         GetOperatingModeReq;
       QMIDMS_GET_OPERATING_MODE_RESP_MSG        GetOperatingModeResp;
+#endif
       QMIDMS_SET_OPERATING_MODE_REQ_MSG         SetOperatingModeReq;
       QMIDMS_SET_OPERATING_MODE_RESP_MSG        SetOperatingModeResp;
+#if 0
       QMIDMS_UIM_GET_ICCID_REQ_MSG              GetICCIDReq;
       QMIDMS_UIM_GET_ICCID_RESP_MSG             GetICCIDResp;
       QMIDMS_ACTIVATE_AUTOMATIC_REQ_MSG         ActivateAutomaticReq;

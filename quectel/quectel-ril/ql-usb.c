@@ -22,59 +22,57 @@
 #include "ql-log.h"
 
 #define USBID_LEN 4
+#define MAX_PATH 256
 
-static struct utsname utsname;  /* for the kernel version */
-static int kernel_version;
-#define KVERSION(j,n,p) ((j)*1000000 + (n)*1000 + (p))
-
-struct ql_usb_id_struct {
-    unsigned short vid;
-    unsigned short pid;
-    unsigned short at_inf;
-    unsigned short ppp_inf;
+struct ql_module_info {
+    const char idVendor[USBID_LEN+1];
+    const char idProduct[USBID_LEN+1];
+    char dm_inf;
+    char gps_inf;
+    char at_inf;
+    char ppp_inf;
+    char ndis_inf;
+    const char *driver;
 };
 
-static const struct ql_usb_id_struct ql_usb_id_table[] = {
-    {0x05c6, 0x9003, 2, 3}, //UC20
-    {0x05c6, 0x9090, 2, 3}, //UC15
-    {0x05c6, 0x9215, 2, 3}, //EC20
-    {0x1519, 0x0331, 6, 0}, //UG95
-    {0x1519, 0x0020, 6, 0}, //UG95
-    {0x05c6, 0x9025, 2, 3}, //EC25
-    {0x2c7c, 0x0125, 2, 3}, //EC25
-    {0x2c7c, 0x0121, 2, 3}, //EC25
+struct ql_usb_device_info {
+    const struct ql_module_info *module_info;
+    char usbdevice_pah[MAX_PATH];
+    char ttyDM[16];
+    char ttyGPS[16];
+    char ttyAT[16];
+    char ttyPPP[16];
+    char ttyNDIS[16];
 };
 
-static int ql_get_usbnet_adapter(struct ql_usb_device_info *pusb_device_info);
+static const struct ql_module_info ql_module_info_table[] = {
+    {"1519", "0331", -1, -1, 6, 0, -1, "cdc-acm"}, //UG95
+    {"1519", "0020", -1, -1, 6, 0, -1, "cdc-acm"}, //UG95
+    {"05c6", "9003", -1, -1, 2, 3, 4, "option"}, //UC20
+    {"05c6", "9090", -1, -1, 2, 3, -1, "option"}, //UC15
+    {"05c6", "9215", 0, 1, 2, 3, 4, "option"}, //EC20
+    {"2c7c", "0125", 0, 1, 2, 3, 4, "option"}, //EC25
+    {"2c7c", "0121", 0, 1, 2, 3, 4, "option"}, //EC21
+    {"2c7c", "0191", 0, 1, 2, 3, 4, "option"}, //EG91
+    {"2c7c", "0195", 0, 1, 2, 3, 4, "option"}, //EG95
+    {"2c7c", "0306", 0, 1, 2, 3, 4, "option"}, //EG06/EP06/EM06
+    {"2c7c", "0296", 0, 1, 2, 3, 4, "option"}, //BG96
+    {"2c7c", "0435", 0, 1, 2, 3, 4, "option"}, //AG35
+};
 
-int is_usb_match(unsigned short vid, unsigned short pid) {
+static struct ql_usb_device_info s_usb_device_info[MAX_CARD_NUM];
+
+static const struct ql_module_info * ql_get_module_info(char idVendor[USBID_LEN+1], char idProduct[USBID_LEN+1]) {
     size_t i;
-    for (i = 0; i < ARRAY_SIZE(ql_usb_id_table); i++)
-    {
-        if (vid == ql_usb_id_table[i].vid) 
-        {
-            if (pid == 0x0000) //donot check pid
-                return 1;
-            else if (pid == ql_usb_id_table[i].pid)
-                return 1;
-        }
+#define ARRAY_SIZE(a) (sizeof(a)/sizeof(a[0]))
+    for (i = 0; i < ARRAY_SIZE(ql_module_info_table); i++) {
+        if (!strncasecmp(ql_module_info_table[i].idVendor, idVendor, USBID_LEN) && !strncasecmp(ql_module_info_table[i].idProduct, idProduct, USBID_LEN)) 
+            return &ql_module_info_table[i];
     }
-    return 0;
+    return NULL;
 }
     
-static int idusb2hex(char idusbinfo[USBID_LEN]) {
-    int i;
-    int value = 0;
-    for (i = 0; i < USBID_LEN; i++) {
-        if (idusbinfo[i] < 'a')
-            value |= ((idusbinfo[i] - '0') << ((3 - i)*4));
-        else
-            value |= ((idusbinfo[i] - 'a' + 10) << ((3 - i)*4));
-    }
-    return value;
-}
-
-int ql_find_usb_device(struct ql_usb_device_info *pusb_device_info)//struct ql_usb_device_info *usb_device_info, char *dir)
+static int ql_find_module(struct ql_usb_device_info *pusb_device_info)
 { 
     DIR *pDir;
     int fd;
@@ -82,226 +80,105 @@ int ql_find_usb_device(struct ql_usb_device_info *pusb_device_info)//struct ql_u
     int find_usb_device = 0;
     struct stat statbuf;
     struct dirent* ent = NULL;
-    int idVendor,idProduct;
     struct ql_usb_device_info usb_device_info;
-    char dir[MAX_PATH] = {0};
+    const char *dir = "/sys/bus/usb/devices";
     
-    strcat(dir, "/sys/bus/usb/devices");
     if ((pDir = opendir(dir)) == NULL)  {
         LOGE("Cannot open directory:%s/", dir);  
-        return -1;
+        return 0;
     }
+    
     while ((ent = readdir(pDir)) != NULL)  {
         memset(&usb_device_info, 0, sizeof(usb_device_info));
+        
         sprintf(filename, "%s/%s", dir, ent->d_name);
         lstat(filename, &statbuf);
         if (S_ISLNK(statbuf.st_mode))  {
-            char idusbinfo[USBID_LEN+1] = {0};
-            idVendor = idProduct = 0x0000;
+            char idVendor[USBID_LEN+1] = {0};
+            char idProduct[USBID_LEN+1] = {0};
+
             sprintf(filename, "%s/%s/idVendor", dir, ent->d_name);
             fd = open(filename, O_RDONLY);
             if (fd > 0) {
-                if (4 == read(fd, idusbinfo, USBID_LEN))
-                    idVendor = idusb2hex(idusbinfo);
+                read(fd, idVendor, USBID_LEN);
                 close(fd);
             }
-            if (!is_usb_match(idVendor, idProduct))
-                continue;
+            
             sprintf(filename, "%s/%s/idProduct", dir, ent->d_name);
             fd = open(filename, O_RDONLY);
             if (fd > 0) {
-                if (4 == read(fd, idusbinfo, USBID_LEN))
-                    idProduct = idusb2hex(idusbinfo);
+                read(fd, idProduct, USBID_LEN);
                 close(fd);
             }
-            if (!is_usb_match(idVendor, idProduct))
+            
+            if (!ql_get_module_info(idVendor, idProduct))
                 continue;
 
             if (find_usb_device > MAX_CARD_NUM){
                 LOGE("usb device number is more than max number,please repair it");
                 break;
             }
-            
-            strcpy(usb_device_info.usb_device_name, ent->d_name);
-            usb_device_info.idProduct = idProduct;
-            usb_device_info.idVendor = idVendor;
-            strcpy(usb_device_info.usbdevice_pah, dir);
+
+            snprintf(usb_device_info.usbdevice_pah, sizeof(usb_device_info.usbdevice_pah), "%s/%s", dir, ent->d_name);
+            usb_device_info.module_info = ql_get_module_info(idVendor, idProduct);
             
             memcpy(&pusb_device_info[find_usb_device], &usb_device_info, sizeof(struct ql_usb_device_info));
             find_usb_device++;
+            LOGD("find quectel module %s idVendor=%s idProduct=%s", usb_device_info.usbdevice_pah, idVendor, idProduct);
         }
     }
+    
     closedir(pDir);
     return find_usb_device;
 }
 
-static int ql_get_usb_inteface(int usb_interface, int idVendor, int idProduct)
-{
-    size_t i;
-    if (usb_interface == USB_AT_INF)
-        sleep(1); //wait load usb driver
-    
-    for (i = 0; i < ARRAY_SIZE(ql_usb_id_table); i++) {
-        if ((idVendor == ql_usb_id_table[i].vid) && (idProduct == ql_usb_id_table[i].pid)) {
-            if (usb_interface == USB_AT_INF) {
-                usb_interface = ql_usb_id_table[i].at_inf;
-                break;
-            } else if (usb_interface == USB_PPP_INF) {
-                usb_interface = ql_usb_id_table[i].ppp_inf;
-                break;
-            }
-        }
-    }
-
-    if (i == ARRAY_SIZE(ql_usb_id_table))
-        return -1;
-    
-    return usb_interface;
-}
-
-
-char *ql_get_out_ttyname(int usb_interface, struct ql_usb_device_info *usb_device_info)
+static int ql_find_ttyname(int usb_interface, const char usbdevice_pah[MAX_PATH], char out_ttyname[16])
 {
     DIR *pDir;
     struct dirent* ent = NULL;
     char dir[MAX_PATH]={0};
-    char out_ttyname[32] = {0};
-    
-    strcat(dir, usb_device_info->usbdevice_pah);
 
-    int idVendor = usb_device_info->idVendor;
-    int idProduct = usb_device_info->idProduct;
-
-    usb_interface = ql_get_usb_inteface(usb_interface, idVendor, idProduct);
-
-    if(usb_interface < 0){
-        return NULL;
+    out_ttyname[0] = 0;
+    if(usb_interface < 0) {
+        return 0;
     }
 
-    if (usb_device_info->usb_device_name[0]) {
-        char usb_inf_path[20];
-        sprintf(usb_inf_path, ":1.%d", usb_interface);
-
-        strcat(dir, usb_inf_path);
-        if ((pDir = opendir(dir)) == NULL) {
-            LOGE("Cannot open directory:%s/", dir);              
-            return NULL;
-        }
-    
-        while ((ent = readdir(pDir)) != NULL) {
-            if (strncmp(ent->d_name, "tty", 3) == 0) {
-                LOGD("find vid=0x%04x, pid=0x%04x, tty=%s", idVendor, idProduct, ent->d_name);
-                strcpy(out_ttyname, ent->d_name);
-                break;
-            }
-        }
-        closedir(pDir); 
+    snprintf(dir, sizeof(dir), "%s:1.%d", usbdevice_pah, usb_interface);
+    if ((pDir = opendir(dir)) == NULL) {
+        LOGE("Cannot open directory:%s/", dir);              
+        return 0;
     }
+    
+    while ((ent = readdir(pDir)) != NULL) {
+        if (strncmp(ent->d_name, "tty", 3) == 0) {
+            LOGD("find %s/%s", dir, ent->d_name);
+            strcpy(out_ttyname, ent->d_name);
+            break;
+        }
+    }
+    closedir(pDir); 
 
     if (strcmp(out_ttyname, "tty") == 0) { //find tty not ttyUSBx or ttyACMx
         strcat(dir, "/tty");
         if ((pDir = opendir(dir)) == NULL)  {  
-            LOGE("Cannot open directory:%s/", dir);      
-            return NULL;
+            LOGE("Cannot open directory:%s", dir);      
+            return 0;
         }
     
         while ((ent = readdir(pDir)) != NULL)  {
             if (strncmp(ent->d_name, "tty", 3) == 0) {
-                LOGD("find vid=0x%04x, pid=0x%04x, tty=%s", idVendor, idProduct, ent->d_name);
+                LOGD("find %s/%s", dir, ent->d_name);
                 strcpy(out_ttyname, ent->d_name);
                 break;
             } 
         }
         closedir(pDir); 
     }
-    
-    if (out_ttyname[0] == 0 && idVendor != ql_usb_id_table[3].vid) {
-        if (access("/sys/bus/usb-serial/drivers/option1/new_id", W_OK) == 0) {
-            char *cmd;
-            LOGE("find usb serial option driver, but donot cantain quectel vid&pid");
-            asprintf(&cmd, "echo 0x%x 0x%x > /sys/bus/usb-serial/drivers/option1/new_id", idVendor, idProduct);
-            system(cmd);
-            free(cmd);   
-        } else {
-            LOGE("can not find usb serial option driver");
-        }
-    }
 
-    if (out_ttyname[0]) {
-        strcpy(usb_device_info->ttyAT_name, out_ttyname);
-        return usb_device_info->ttyAT_name;
-    }
-
-    return NULL;
+    return out_ttyname[0];
 }
 
-int ql_get_usb_device_info(int usb_interface) 
-{
-    struct dirent* ent = NULL;  
-    DIR *pDir;  
-    char dir[MAX_PATH], filename[MAX_PATH];
-    int idVendor = 0, idProduct = 0;
-    int find_usb_device = 0;
-
-    int i = 0;    
-    struct ql_usb_device_info usb_device_info[MAX_CARD_NUM];
-    memset(usb_device_info, 0, MAX_CARD_NUM * sizeof(struct ql_usb_device_info));
-
-    find_usb_device = ql_find_usb_device(usb_device_info);
-    
-    if(!find_usb_device) {
-        return 0;
-    }    
-
-    for(i = 0; i < find_usb_device; i++) {
-        strcat(usb_device_info[i].usbdevice_pah, "/");
-        strcat(usb_device_info[i].usbdevice_pah, usb_device_info[i].usb_device_name);
-
-        if(USB_AT_INF == usb_interface || USB_PPP_INF == usb_interface) {
-            ql_get_out_ttyname(usb_interface, &usb_device_info[i]);
-        }
-        
-        ql_get_usbnet_adapter(&usb_device_info[i]);
-    }
-
-    memcpy(s_usb_device_info, usb_device_info, sizeof(usb_device_info));
-
-    return find_usb_device;
-}
-
-char * ql_get_ttyname(int usb_interface, char *out_ttyname)
-{
-    int cnt = ql_get_usb_device_info(usb_interface);
-        
-    if( 0 < cnt ) {
-        strcpy(out_ttyname, s_usb_device_info[0].ttyAT_name);
-        return (0 == s_usb_device_info[0].ttyAT_name[0]) ? NULL : s_usb_device_info[0].ttyAT_name;   
-    }
-
-    return NULL;
-}
-
-char *ql_get_usb_class_name()
-{
-    char *usb_class_name = NULL;
-    int osmaj, osmin, ospatch;
-
-    /* get the kernel version now, since we are called before sys_init */
-    uname(&utsname);
-    osmaj = osmin = ospatch = 0;
-    sscanf(utsname.release, "%d.%d.%d", &osmaj, &osmin, &ospatch);
-    kernel_version = KVERSION(osmaj, osmin, ospatch);
-    if (kernel_version < KVERSION(3, 6, 0)) {
-        usb_class_name = "usb";
-    } else {
-        usb_class_name = "usbmisc";
-    }
-
-    return usb_class_name;
-}
-
-
-int ql_make_node(char *dir, char *usb_device_name)
+static int ql_find_cdc_wdm(char *dir, char *usb_device_name)
 {
     char subdir[MAX_PATH]={0};
     DIR *pDir, *pSubDir;
@@ -333,7 +210,8 @@ int ql_make_node(char *dir, char *usb_device_name)
     }
     while ((subent = readdir(pSubDir)) != NULL) {
         if (strncmp(subent->d_name, "cdc-wdm", strlen("cdc-wdm")) == 0) {
-            LOGD("Find qmichannel = %s", subent->d_name);
+            LOGD("find %s/%s", subdir, subent->d_name);
+            LOGD("qmichannel = %s", subent->d_name);
             find_qmichannel = 1;
         #if 1
             snprintf(uevent_path, MAX_PATH, "%s/%s/%s", subdir, subent->d_name, "uevent");
@@ -386,7 +264,7 @@ int ql_make_node(char *dir, char *usb_device_name)
     return find_qmichannel;
 }
 
-int ql_find_qcqmi(char *dir)
+static int ql_find_qcqmi(char *dir)
 {
     char subdir[MAX_PATH]={0};
     DIR *pSubDir;
@@ -395,15 +273,18 @@ int ql_find_qcqmi(char *dir)
 
     strcpy(subdir, dir);
     strcat(subdir, "/GobiQMI");
+    
     if ((pSubDir = opendir(subdir)) == NULL)  {    
-       LOGE("Cannot open directory:%s/", subdir);
-      return -ENODEV;
+        LOGE("Cannot open directory:%s/", subdir);
+        return -ENODEV;
     }
+    
     while ((subent = readdir(pSubDir)) != NULL) {
        if (strncmp(subent->d_name, "qcqmi", strlen("qcqmi")) == 0) {
-           LOGD("Find qmichannel = %s", subent->d_name);
-           find_qmichannel = 1;
-           break;
+            LOGD("Find %s/%s", subdir, subent->d_name);
+            LOGD("qmichannel = %s", subent->d_name);
+            find_qmichannel = 1;
+            break;
        }                         
     }
     
@@ -411,7 +292,7 @@ int ql_find_qcqmi(char *dir)
     return find_qmichannel;
 }
 
-char* ql_find_usbnet_adapter(char *dir)
+static char* ql_find_usbnet_adapter(char *dir)
 {
     char subdir[MAX_PATH]={0};
     DIR *pSubDir;
@@ -429,7 +310,8 @@ char* ql_find_usbnet_adapter(char *dir)
             || (strncmp(subent->d_name, "usb", strlen("usb")) == 0)) {
             static char s_pp_usbnet_adapter[32]={0};
             strcpy(s_pp_usbnet_adapter, subent->d_name);
-            LOGD("Find usbnet_adapter = %s", s_pp_usbnet_adapter);
+            LOGD("find %s/%s", subdir, subent->d_name);
+            LOGD("usbnet_adapter = %s", s_pp_usbnet_adapter);
             closedir(pSubDir);
             return s_pp_usbnet_adapter;
         }
@@ -439,102 +321,169 @@ char* ql_find_usbnet_adapter(char *dir)
     return NULL;
 }
 
-
-int ql_find_ndis(char *usb_class_name, struct ql_usb_device_info *pusb_device_info)
+static int ql_find_ndis(int usb_interface, const char usbdevice_path[MAX_PATH], char out_ttyname[16])
 {
     struct dirent* ent = NULL;  
-    struct dirent* subent = NULL; 
-    char subdir[MAX_PATH]={0};
-    DIR *pDir, *pSubDir;
+    DIR *pDir;
     int find_qmichannel = 0;
     char dir[MAX_PATH] = {0};
     char *p_usbnet_adapter = NULL;
-    strcpy(dir, pusb_device_info->usbdevice_pah);
 
-    sprintf(subdir, ":1.%d", 4);
-    strcat(dir, subdir);
+    snprintf(dir, sizeof(dir), "%s:1.%d", usbdevice_path, usb_interface);
     
-    if ((pDir = opendir(dir)) == NULL)  {  
+    if ((pDir = opendir(dir)) == NULL) {  
         LOGE("Cannot open directory:%s/", dir);  
-        return -ENODEV;  
+        return 0;  
     }
     
     while ((ent = readdir(pDir)) != NULL) {
-        if ((strlen(ent->d_name) == strlen(usb_class_name) && !strncmp(ent->d_name, usb_class_name, strlen(usb_class_name)))) {
-            find_qmichannel = (1 == ql_make_node(dir, ent->d_name)) ? 1 : 0;
-        } else if (strncmp(ent->d_name, "GobiQMI", strlen("GobiQMI")) == 0) {
-            find_qmichannel = (1 == ql_find_qcqmi(dir)) ? 1 : 0;
-        } else if (strncmp(ent->d_name, "net", strlen("net")) == 0) {
+        if (!strncmp(ent->d_name, "usb", strlen("usb"))) {
+            find_qmichannel = ql_find_cdc_wdm(dir, ent->d_name);
+        } else if (!strncmp(ent->d_name, "GobiQMI", strlen("GobiQMI"))) {
+            find_qmichannel = ql_find_qcqmi(dir);
+        } else if (!strncmp(ent->d_name, "net", strlen("net"))) {
             p_usbnet_adapter = ql_find_usbnet_adapter(dir);
         }
 
         if (find_qmichannel && p_usbnet_adapter)
         {
-            strcpy(pusb_device_info->ttyndis_name, p_usbnet_adapter);
+            strcpy(out_ttyname, p_usbnet_adapter);
             break;
         }
     }
     closedir(pDir);     
 
-    return (find_qmichannel && p_usbnet_adapter) ? 0 : -1;
-
+    return (find_qmichannel && p_usbnet_adapter) ? 1 : 0;
 }
 
-static int ql_get_usbnet_adapter(struct ql_usb_device_info *pusb_device_info)
+char * ql_get_ttyGPS(char *out_ttyname) {
+    if (!s_usb_device_info[0].ttyGPS[0]) {
+        LOGE("cannot find ttyname for GPS Port");
+        return NULL;
+    }
+
+    strcpy(out_ttyname, s_usb_device_info[0].ttyGPS);
+    return out_ttyname;
+}
+
+char * ql_get_ttyAT(char *out_ttyname) {
+    if (!s_usb_device_info[0].ttyAT[0]) {
+        LOGE("cannot find ttyname for AT Port");
+        return NULL;
+    }
+
+    strcpy(out_ttyname, s_usb_device_info[0].ttyAT);
+    return out_ttyname;
+}
+
+char * ql_get_ttyPPP(char *out_ttyname) {
+    if (!s_usb_device_info[0].ttyPPP[0]) {
+        LOGE("cannot find ttyname for PPP Port");
+        return NULL;
+    }
+  
+    strcpy(out_ttyname, s_usb_device_info[0].ttyPPP);
+    return out_ttyname;
+}
+
+char * ql_get_ndisname(char *out_ttyname, int i) {
+    if (!s_usb_device_info[i].ttyNDIS[0]) {
+        //LOGE("cannot find ttyname for NDIS Port");
+        return NULL;
+    }
+  
+    strcpy(out_ttyname, s_usb_device_info[0].ttyNDIS);
+    return out_ttyname;
+}
+
+int ql_is_quectel_ttyport(const char*in_ttyname) {
+    if (s_usb_device_info[0].ttyDM[0] && strstr(in_ttyname, s_usb_device_info[0].ttyDM)) {
+        return 1;
+    }
+    if (s_usb_device_info[0].ttyGPS[0] && strstr(in_ttyname, s_usb_device_info[0].ttyGPS)) {
+        return 1;
+    }    
+    if (s_usb_device_info[0].ttyAT[0] && strstr(in_ttyname, s_usb_device_info[0].ttyAT)) {
+        return 1;
+    }
+    if (s_usb_device_info[0].ttyPPP[0] && strstr(in_ttyname, s_usb_device_info[0].ttyPPP)) {
+        return 1;
+    }
+    return 0;
+}
+
+int ql_detect_quectel_modules(void) 
 {
-    char dir[MAX_PATH]={0};
-    int fd;
     int find_usb_device = 0;
-    int find_qmichannel = 0;
+    int i = 0;    
+    struct ql_usb_device_info usb_device_info[MAX_CARD_NUM];
+    
+    memset(usb_device_info, 0, sizeof(usb_device_info));
 
-    char *usb_class_name = NULL;
-
-    int i = 0;
-
-    usb_class_name = ql_get_usb_class_name();
-
-    do {
-        if(!ql_find_ndis(usb_class_name, pusb_device_info)) {
-            return 0;
-        }
-
-    } while(0); //just for one card
-
-    return -1;
-}
-
-
-int ql_get_ndisname(char **pp_usbnet_adapter)
-{
-    int cnt = ql_get_usb_device_info(USB_AT_INF);
-        
-    if(cnt > 0) {
-        *pp_usbnet_adapter = (0 == s_usb_device_info[0].ttyndis_name[0]) ? NULL : s_usb_device_info[0].ttyndis_name;
+    find_usb_device = ql_find_module(usb_device_info);
+    
+    if(!find_usb_device) {
+        memcpy(s_usb_device_info, usb_device_info, sizeof(usb_device_info));
         return 0;
     }
-    
-    *pp_usbnet_adapter = NULL;
-    return -1;
+
+    sleep(1); //wait usb driver load
+
+    for(i = 0; i < find_usb_device; i++) {
+        struct ql_module_info *info = (struct ql_module_info *)usb_device_info[i].module_info;
+        
+        if (ql_find_ttyname(info->at_inf, usb_device_info[i].usbdevice_pah, usb_device_info[i].ttyAT)) {
+            LOGD("ttyAT = %s", usb_device_info[i].ttyAT);
+        } else {
+            if (!strcmp(info->driver, "option")) {
+                if (access("/sys/bus/usb-serial/drivers/option1/new_id", W_OK) == 0) {
+                    char *cmd;
+                    LOGE("find usb serial option driver, but donot cantain quectel vid&pid");
+                    asprintf(&cmd, "echo %s %s > /sys/bus/usb-serial/drivers/option1/new_id", info->idVendor, info->idProduct);
+                    system(cmd);
+                    free(cmd);
+                    sleep(1); //wait usb driver load
+                    return 0;
+                } else {
+                    LOGE("can not find usb serial option driver");
+                }
+            }
+        }
+
+        if (info->ppp_inf > 0 && ql_find_ttyname(info->ppp_inf, usb_device_info[i].usbdevice_pah, usb_device_info[i].ttyPPP)) {
+            LOGD("ttyPPP = %s", usb_device_info[i].ttyPPP);
+        }
+        
+        if (info->dm_inf >= 0 && ql_find_ttyname(info->dm_inf, usb_device_info[i].usbdevice_pah, usb_device_info[i].ttyDM)) {
+            LOGD("ttyDM = %s", usb_device_info[i].ttyDM);
+        }
+
+        if (info->gps_inf > 0 && ql_find_ttyname(info->gps_inf, usb_device_info[i].usbdevice_pah, usb_device_info[i].ttyGPS)) {
+            LOGD("ttyGPS = %s", usb_device_info[i].ttyGPS);
+        }
+
+        if (info->ndis_inf > 0 && ql_find_ndis(info->ndis_inf, usb_device_info[i].usbdevice_pah, usb_device_info[i].ttyNDIS)) {
+            LOGD("ttyNDIS = %s", usb_device_info[i].ttyNDIS);
+        }
+    }
+
+    memcpy(s_usb_device_info, usb_device_info, sizeof(usb_device_info));
+
+    return find_usb_device;
 }
 
-void ql_set_autosuspend(int enable)
-{
-    char dir[MAX_PATH];
-    int index = 0;
-
-    memset(dir, 0, sizeof(dir));
-
-    int cnt = ql_get_usb_device_info(USB_AT_INF);
+void ql_set_autosuspend(int enable) {
+    int i = 0;
 
     do {
-        if (s_usb_device_info[index].usbdevice_pah[0]) {
+        if (s_usb_device_info[i].usbdevice_pah[0]) {
             char shell_command[MAX_PATH+32];
-            snprintf(shell_command, sizeof(shell_command), "echo %s > %s/power/control", enable ? "auto" : "on", s_usb_device_info[index].usbdevice_pah);
+            snprintf(shell_command, sizeof(shell_command), "echo %s > %s/power/control", enable ? "auto" : "on", s_usb_device_info[i].usbdevice_pah);
             system(shell_command);
             LOGD("%s", shell_command);
             LOGD("%s %s", __func__, enable ? "auto" : "off");
         }
 
-        index++;
-    } while(index < MAX_CARD_NUM);
+        i++;
+    } while(i < MAX_CARD_NUM);
 }

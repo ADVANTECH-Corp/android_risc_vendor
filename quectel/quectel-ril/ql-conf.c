@@ -10,10 +10,13 @@
 
 char s_commamd_line[128][64] = {{0}};
 int  s_commamd_line_cnt = 0;
+
 static void ql_get_commamd_line(const char *line, const char *delim);
 static char* ql_rm_pre_space(char *line);
+static char* ql_rm_tail_space(char *line);
 static void ql_at_cmds_for_customer_initialize(const char *line);
 static void ql_icc_constants_init(const char *line);
+static void ql_voice_over_usb_mode(char *line);
 
 int read_conf_of_ril_init()
 {
@@ -26,9 +29,15 @@ int read_conf_of_ril_init()
     char tmp_buf[BUF_SIZE] = {0};
     char buf[BUF_SIZE] = {0};
 
-    FILE * fp = fopen(path, "r");
+    if(access(path, F_OK))
+    {
+        LOGE("'%s' not exist.", path);
+        return -1;
+    }
 
+    FILE * fp = fopen(path, "r");
     if(NULL == fp) {
+        LOGE("open '%s' failure.", path);
         return -1;
     }
 
@@ -50,13 +59,19 @@ int read_conf_of_ril_init()
         LOGD("original conf line: %s", p);
 
         if(strstr(p, "LTE_SignalStrength")) {
-            s_ril_conf_init.LTE_SignalStrength= (int)strtol(strchr(p, '=') + 1, NULL, FORMATS_0X);
+            s_ril_conf_init.LTE_SignalStrength= (int)strtol(strchr(p, '=') + 1, NULL, FORMATS_D);
+            LOGD("LTE_SignalStrength = %d", s_ril_conf_init.LTE_SignalStrength);
         } else if(strstr(p, "LTE_Is_Report_SignalStrength")) {
             s_ril_conf_init.LTE_Is_Report_SignalStrength = (int)strtol(strchr(p, '=') + 1, NULL, FORMATS_D);
+            LOGD("LTE_Is_Report_SignalStrength = %d", s_ril_conf_init.LTE_Is_Report_SignalStrength);
         } else if(strstr(p, "At_Cmds_For_Customer_Initialize")) {
             ql_at_cmds_for_customer_initialize(strchr(p, '=') + 1);
         } else if(strstr(p, "Icc_Constants")) {
             ql_icc_constants_init(strchr(p, '=') + 1);
+        } else if(strstr(p, "Voice_Over_Usb_Mode")) {
+            ql_voice_over_usb_mode(strchr(p, '=') + 1);
+        } else if(strstr(p, "support_CDMPhone")) {
+            s_ril_conf_init.support_CDMPhone= (int)strtol(strchr(p, '=') + 1, NULL, FORMATS_D);
         }
 clear:
         p = NULL;
@@ -179,6 +194,13 @@ static void ql_get_commamd_line(const char *line, const char *delim)
     }
 }
 
+static void ql_voice_over_usb_mode(char *line)
+{
+    line = ql_rm_pre_space(line);
+    line = ql_rm_tail_space(line);
+    strcpy(s_ril_conf_init.Voice_Over_Usb_Mode, line);
+}
+
 static char* ql_rm_pre_space(char *line)
 {
     if((NULL == line) || ( '\0' == *line)) return NULL;
@@ -186,3 +208,14 @@ static char* ql_rm_pre_space(char *line)
     return ('\0' == *line) ?  NULL : line;
 }
 
+static char* ql_rm_tail_space(char *line)
+{
+    char *p = NULL;
+    if((NULL == line) || ( '\0' == *line)) return NULL;
+    p = strchr(line, '\0');
+
+    while('\t' == *(p-1) || '\n' == *(p-1) || ' ' == *(p-1)) p--;
+    *p = '\0';
+
+    return ('\0' == *line) ?  NULL : line;
+}

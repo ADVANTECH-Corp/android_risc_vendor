@@ -103,8 +103,15 @@ void udhcpc_start(PROFILE_T *profile) {
     ql_system(shell_cmd);
 
 #if 1 //for bridge mode, only one public IP, so donot run udhcpc to obtain
-#define BRIDGE_MODE_FILE "/sys/module/GobiNet/parameters/bridge_mode"
-#define BRIDGE_IPV4_FILE "/sys/module/GobiNet/parameters/bridge_ipv4"
+{
+    const char *BRIDGE_MODE_FILE = "/sys/module/GobiNet/parameters/bridge_mode";
+    const char *BRIDGE_IPV4_FILE = "/sys/module/GobiNet/parameters/bridge_ipv4";
+
+    if (strncmp(qmichannel, "/dev/qcqmi", strlen("/dev/qcqmi"))) {
+        BRIDGE_MODE_FILE = "/sys/module/qmi_wwan/parameters/bridge_mode";
+        BRIDGE_IPV4_FILE = "/sys/module/qmi_wwan/parameters/bridge_ipv4";
+    }
+
     if (profile->ipv4.Address && !access(BRIDGE_MODE_FILE, R_OK)) {
         int bridge_fd = open(BRIDGE_MODE_FILE, O_RDONLY);
         char bridge_mode[2] = {0, 0};
@@ -113,12 +120,13 @@ void udhcpc_start(PROFILE_T *profile) {
             read(bridge_fd, &bridge_mode, sizeof(bridge_mode));
             close(bridge_fd);
             if(bridge_mode[0] != '0') {
-                snprintf(shell_cmd, sizeof(shell_cmd), "echo 0x%08x > " BRIDGE_IPV4_FILE, profile->ipv4.Address);
+                snprintf(shell_cmd, sizeof(shell_cmd), "echo 0x%08x > %s", profile->ipv4.Address, BRIDGE_IPV4_FILE);
                 ql_system(shell_cmd);
                 return;
             }
         }
     }
+}
 #endif
 
 //because must use udhcpc to obtain IP when working on ETH mode,

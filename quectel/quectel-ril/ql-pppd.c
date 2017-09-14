@@ -25,13 +25,6 @@ extern char *g_ppp_number;
 extern int ql_mux_enabled;
 
 #define MAX_PATH 256
-#define USBID_LEN 4
-struct ql_usb_id_struct {
-    unsigned short vid;
-    unsigned short pid;
-    unsigned short at_inf;
-    unsigned short ppp_inf;
-};
 
 static int ql_is_digit(const char *pdigit)
 {
@@ -94,27 +87,6 @@ out:
         closedir(pDir);
     }
     return ret;
-}
-
-char * ql_get_ttyAT(char *out_ttyname) {
-    if(!ql_get_ttyname(USB_AT_INF, out_ttyname)) {
-        LOGE("cannot find ttyname for AT Port");
-        return NULL;
-    }
-
-#if 0 //use uart to instead usb at port to send AT
-    strcpy(out_ttyname, "ttyUSB0");
-#endif
-    return out_ttyname;
-}
-
-char *  ql_get_ttyPPP(char *out_ttyname) {
-    if(!ql_get_ttyname(USB_PPP_INF, out_ttyname)) {
-        LOGE("cannot find ttyname for PPP Port");
-        return NULL;
-    }
-  
-    return out_ttyname;
 }
 
 static int chat(int fd, const char *at, const char *expect, int timeout, char **response) {

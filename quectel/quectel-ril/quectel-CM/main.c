@@ -1,9 +1,9 @@
 #include "QMIThread.h"
 #include <sys/wait.h>
 #include <sys/utsname.h>
+#include <sys/time.h>
 #include <dirent.h>
 
-#define POLL_DATA_CALL_STATE_SECONDS 15 //poll data call state, for qmi ind maybe not work well
 //#define CONFIG_EXIT_WHEN_DIAL_FAILED
 //#define CONFIG_BACKGROUND_WHEN_GET_IP
 //#define CONFIG_PID_FILE_FORMAT "/var/run/quectel-CM-%s.pid" //for example /var/run/quectel-CM-wwan0.pid
@@ -332,18 +332,109 @@ static int usage(const char *progname) {
 static int qmidevice_detect(char **pp_qmichannel, char **pp_usbnet_adapter) {
     struct dirent* ent = NULL;
     DIR *pDir;
-#if 0 //ndef ANDROID
-    int osmaj, osmin, ospatch;
-    static struct utsname utsname;    /* for the kernel version */
-    static int kernel_version;
-#define KVERSION(j,n,p)    ((j)*1000000 + (n)*1000 + (p))
 
-    /* get the kernel version now, since we are called before sys_init */
-    uname(&utsname);
-    osmaj = osmin = ospatch = 0;
-    sscanf(utsname.release, "%d.%d.%d", &osmaj, &osmin, &ospatch);
-    kernel_version = KVERSION(osmaj, osmin, ospatch);
-#endif
+    char dir[255] = "/sys/bus/usb/devices";
+    pDir = opendir(dir);
+    if (pDir)  {
+        while ((ent = readdir(pDir)) != NULL)  {
+            struct dirent* subent = NULL;
+            DIR *psubDir;
+            char subdir[255];
+
+            char idVendor[4+1] = {0};
+            char idProduct[4+1] = {0};
+            int fd;
+
+            char netcard[32] = "\0";
+            char qmifile[32] = "\0";
+
+            snprintf(subdir, sizeof(subdir), "%s/%s/idVendor", dir, ent->d_name);
+            fd = open(subdir, O_RDONLY);
+            if (fd > 0) {
+                read(fd, idVendor, 4);
+                close(fd);
+             }
+
+            snprintf(subdir, sizeof(subdir), "%s/%s/idProduct", dir, ent->d_name);
+            fd  = open(subdir, O_RDONLY);
+            if (fd > 0) {
+                read(fd, idProduct, 4);
+                close(fd);
+            }
+
+            if (!strncasecmp(idVendor, "05c6", 4) || !strncasecmp(idVendor, "2c7c", 4))
+                ;
+            else
+                continue;
+
+            dbg_time("Find %s/%s idVendor=%s idProduct=%s", dir, ent->d_name, idVendor, idProduct);
+
+            snprintf(subdir, sizeof(subdir), "%s/%s:1.4/net", dir, ent->d_name);
+            psubDir = opendir(subdir);
+            if (psubDir == NULL)  {
+                dbg_time("Cannot open directory: %s, errno: %d (%s)", subdir, errno, strerror(errno));
+                continue;
+            }
+
+            while ((subent = readdir(psubDir)) != NULL)  {
+                if (subent->d_name[0] == '.')
+                    continue;
+                dbg_time("Find %s/%s", subdir, subent->d_name);
+                dbg_time("Find usbnet_adapter = %s", subent->d_name);
+                strcpy(netcard, subent->d_name);
+                break;
+            }
+
+            closedir(psubDir);
+
+            if (netcard[0]) { 
+            } else {
+                continue;
+            }
+
+            if (*pp_usbnet_adapter && strcmp(*pp_usbnet_adapter, netcard))
+                continue;
+
+            snprintf(subdir, sizeof(subdir), "%s/%s:1.4/GobiQMI", dir, ent->d_name);
+            if (access(subdir, R_OK)) {
+                snprintf(subdir, sizeof(subdir), "%s/%s:1.4/usbmisc", dir, ent->d_name);
+                if (access(subdir, R_OK)) {
+                    snprintf(subdir, sizeof(subdir), "%s/%s:1.4/usb", dir, ent->d_name);
+                    if (access(subdir, R_OK)) {
+                        dbg_time("no GobiQMI/usbmic/usb found in %s/%s:1.4", dir, ent->d_name);
+                        continue;
+                    }
+                }
+            }
+            
+            psubDir = opendir(subdir);
+            if (pDir == NULL)  {
+                dbg_time("Cannot open directory: %s, errno: %d (%s)", dir, errno, strerror(errno));
+                continue;
+            }
+
+            while ((subent = readdir(psubDir)) != NULL)  {
+                if (subent->d_name[0] == '.')
+                    continue;
+                dbg_time("Find %s/%s", subdir, subent->d_name);
+                dbg_time("Find qmichannel = /dev/%s", subent->d_name);
+                snprintf(qmifile, sizeof(qmifile), "/dev/%s", subent->d_name);
+                break;
+            }
+
+            closedir(psubDir);
+
+            if (netcard[0] && qmifile[0]) {
+                *pp_qmichannel = strdup(qmifile);
+                *pp_usbnet_adapter  = strdup(netcard);
+                closedir(pDir);
+                return 1;
+            }
+
+        }
+        
+        closedir(pDir);
+    }
 
     if ((pDir = opendir("/dev")) == NULL)  {
         dbg_time("Cannot open directory: %s, errno:%d (%s)", "/dev", errno, strerror(errno));
@@ -418,14 +509,14 @@ int main(int argc, char *argv[])
     UCHAR  IPV6ConnectionStatus = 0xff; //unknow state
     char * save_usbnet_adapter = NULL;
     PROFILE_T profile;
-    int slient_seconds = 0;
+#ifdef CONFIG_RESET_RADIO
+    struct timeval resetRadioTime = {0};
+    struct timeval  nowTime;
+    gettimeofday(&resetRadioTime, (struct timezone *) NULL);
+#endif
 
     memset(&profile, 0x00, sizeof(profile));
-#if CONFIG_DEFAULT_PDP
     profile.pdp = CONFIG_DEFAULT_PDP;
-#else
-    profile.pdp = 1;
-#endif
 
     if (!strcmp(argv[argc-1], "&"))
         argc--;
@@ -499,7 +590,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    dbg_time("Quectel_Linux_ConnectManager_SR01A01V28");
+    dbg_time("WCDMA&LTE_QConnectManager_Linux&Android_V1.1.33");
     dbg_time("%s profile[%d] = %s/%s/%s/%d, pincode = %s", argv[0], profile.pdp, profile.apn, profile.user, profile.password, profile.auth, profile.pincode);
 
     signal(SIGUSR1, ql_sigaction);
@@ -595,6 +686,7 @@ __main_loop:
     requestBaseBandVersion(NULL);
 #endif
     requestSetEthMode(&profile);
+#if 0
     if (profile.rawIP && !strncmp(profile.qmichannel, "/dev/cdc-wdm", strlen("/dev/cdc-wdm"))) {
         char raw_ip_switch[128] = {0};
         sprintf(raw_ip_switch, "/sys/class/net/%s/qmi/raw_ip", profile.usbnet_adapter);
@@ -610,6 +702,7 @@ __main_loop:
             }
         }
     }
+#endif
 #ifdef CONFIG_SIM
     requestGetSIMStatus(&SIMStatus);
     if ((SIMStatus == SIM_PIN) && profile.pincode) {
@@ -651,18 +744,14 @@ __main_loop:
         int ne, ret, nevents = sizeof(pollfds)/sizeof(pollfds[0]);
 
         do {
-            ret = poll(pollfds, nevents, (IPv4ConnectionStatus == QWDS_PKT_DATA_CONNECTED) ? 1000 : -1);
+            ret = poll(pollfds, nevents,  15*1000);
         } while ((ret < 0) && (errno == EINTR));
 
         if (ret == 0)
         {
-            #if POLL_DATA_CALL_STATE_SECONDS
-            if (++slient_seconds >= POLL_DATA_CALL_STATE_SECONDS)
-                send_signo_to_main(SIGUSR2);
-            #endif
+            send_signo_to_main(SIGUSR2);
             continue;
         }
-        slient_seconds = 0;
 
         if (ret <= 0) {
             dbg_time("%s poll=%d, errno: %d (%s)", __func__, ret, errno, strerror(errno));
@@ -709,6 +798,15 @@ __main_loop:
 #ifdef CONFIG_EXIT_WHEN_DIAL_FAILED
                                     kill(getpid(), SIGTERM);
 #endif
+#ifdef CONFIG_RESET_RADIO
+                                    gettimeofday(&nowTime, (struct timezone *) NULL);
+                                    if (abs(nowTime.tv_sec - resetRadioTime.tv_sec) > CONFIG_RESET_RADIO) {
+                                        resetRadioTime = nowTime;
+                                        //requestSetOperatingMode(0x06); //same as AT+CFUN=0
+                                        requestSetOperatingMode(0x01); //same as AT+CFUN=4
+                                        requestSetOperatingMode(0x00); //same as AT+CFUN=1
+                                    }
+#endif
                                     alarm(5); //try to setup data call 5 seconds later
                                 }
                             }
@@ -716,12 +814,15 @@ __main_loop:
 
                         case SIGUSR2:
                             if (QWDS_PKT_DATA_CONNECTED == IPv4ConnectionStatus)
-                            {
                                  requestQueryDataCall(&IPv4ConnectionStatus, IpFamilyV4);
-                            }
-                            if (QWDS_PKT_DATA_CONNECTED != IPv4ConnectionStatus || check_ipv4_address(&profile) == 0) //local ip is different with remote ip
-                            {
+
+                            //local ip is different with remote ip
+                            if (QWDS_PKT_DATA_CONNECTED == IPv4ConnectionStatus && check_ipv4_address(&profile) == 0) {
                                 requestDeactivateDefaultPDP(&profile, IpFamilyV4);
+                                IPv4ConnectionStatus = QWDS_PKT_DATA_DISCONNECTED;
+                            }
+                            
+                            if (QWDS_PKT_DATA_CONNECTED != IPv4ConnectionStatus) {
                                 #if defined(ANDROID) || defined(LINUX_RIL_SHLIB)
                                 kill(getpid(), SIGTERM); //android will setup data call again
                                 #else

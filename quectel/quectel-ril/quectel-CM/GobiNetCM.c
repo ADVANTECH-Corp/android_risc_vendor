@@ -100,7 +100,7 @@ void * GobiNetThread(void *pData) {
     qmiclientId[QMUX_TYPE_WDS_ADMIN] = GobiNetGetClientID(qcqmi, QMUX_TYPE_WDS_ADMIN);
 
     //donot check clientWDA, there is only one client for WDA, if quectel-CM is killed by SIGKILL, i cannot get client ID for WDA again!
-    if ((qmiclientId[QMUX_TYPE_WDS] == 0)  /*|| (clientWDA == -1)*/) {
+    if (qmiclientId[QMUX_TYPE_WDS] == 0)  /*|| (clientWDA == -1)*/ {
         GobiNetDeInit();
         dbg_time("%s Failed to open %s, errno: %d (%s)", __func__, qcqmi, errno, strerror(errno));
         qmidevice_send_event_to_main(RIL_INDICATE_DEVICE_DISCONNECTED);
